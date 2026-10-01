@@ -32,14 +32,6 @@ public interface IGameInstanceRepository : IRepository
     public Task<VerifyResult> VerifyAnswer(Submission submission, CancellationToken token = default);
 
     /// <summary>
-    /// Check if the submission is a cheat
-    /// </summary>
-    /// <param name="submission">Submission</param>
-    /// <param name="token"></param>
-    /// <returns></returns>
-    public Task<CheatCheckInfo> CheckCheat(Submission submission, CancellationToken token = default);
-
-    /// <summary>
     /// Create a container for a game instance
     /// </summary>
     /// <param name="team">Team info</param>

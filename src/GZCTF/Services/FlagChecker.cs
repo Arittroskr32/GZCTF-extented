@@ -96,7 +96,7 @@ public class FlagChecker(
 
                 try
                 {
-                    var (type, ans) = await instanceRepository.VerifyAnswer(item, token);
+                    var (type, ans, cheat) = await instanceRepository.VerifyAnswer(item, token);
 
                     switch (ans)
                     {
@@ -109,7 +109,10 @@ public class FlagChecker(
                                 TaskStatus.NotFound, LogLevel.Warning);
                             break;
                         case AnswerResult.Accepted:
+                        case AnswerResult.CheatDetected:
                             {
+                                // Both a legitimate solve and an accepted shared-flag (cheat) solve are
+                                // recorded as accepted and scored. The cheat is additionally recorded below.
                                 logger.Log(
                                     StaticLocalizer[nameof(Resources.Program.FlagChecker_AnswerAccepted),
                                         item.TeamName,
@@ -122,6 +125,28 @@ public class FlagChecker(
 
                                 // always flush the scoreboard
                                 await cacheHelper.FlushScoreboardCache(item.GameId, token);
+
+                                if (ans == AnswerResult.CheatDetected)
+                                {
+                                    logger.Log(
+                                        StaticLocalizer[nameof(Resources.Program.FlagChecker_CheatDetected),
+                                            item.TeamName,
+                                            item.ChallengeName,
+                                            cheat?.SourceTeamName ?? ""],
+                                        item.User, TaskStatus.Success, LogLevel.Information);
+
+                                    await eventRepository.AddEvent(
+                                        new()
+                                        {
+                                            Type = EventType.CheatDetected,
+                                            Values =
+                                                [item.ChallengeName, item.TeamName, cheat?.SourceTeamName ?? ""],
+                                            TeamId = item.TeamId,
+                                            UserId = item.UserId,
+                                            GameId = item.GameId
+                                        }, token);
+                                }
+
                                 break;
                             }
                         default:
@@ -135,30 +160,6 @@ public class FlagChecker(
 
                                 await eventRepository.AddEvent(
                                     GameEvent.FromSubmission(item, type, ans, StaticLocalizer), token);
-
-                                var result = await instanceRepository.CheckCheat(item, token);
-                                ans = result.AnswerResult;
-
-                                if (ans == AnswerResult.CheatDetected)
-                                {
-                                    logger.Log(
-                                        StaticLocalizer[nameof(Resources.Program.FlagChecker_CheatDetected),
-                                            item.TeamName,
-                                            item.ChallengeName,
-                                            result.SourceTeamName ?? ""],
-                                        item.User, TaskStatus.Success, LogLevel.Information);
-
-                                    await eventRepository.AddEvent(
-                                        new()
-                                        {
-                                            Type = EventType.CheatDetected,
-                                            Values =
-                                                [item.ChallengeName, item.TeamName, result.SourceTeamName ?? ""],
-                                            TeamId = item.TeamId,
-                                            UserId = item.UserId,
-                                            GameId = item.GameId
-                                        }, token);
-                                }
 
                                 break;
                             }

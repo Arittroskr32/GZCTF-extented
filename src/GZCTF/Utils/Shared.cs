@@ -2,6 +2,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.Net;
 using System.Threading.Channels;
+using GZCTF.Models.Internal;
 using MemoryPack;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.IO;
@@ -78,7 +79,11 @@ public partial record DataWithModifiedTime<T>(T Data, DateTimeOffset LastModifie
 /// </summary>
 /// <param name="SubType">Submission type</param>
 /// <param name="AnsRes">Flag submission result</param>
-public record VerifyResult(SubmissionType SubType, AnswerResult AnsRes);
+/// <param name="Cheat">
+/// Cheat information when a shared flag was accepted. Non-null only when the submission was accepted
+/// as a solve while also being detected as a shared (cheated) flag.
+/// </param>
+public record VerifyResult(SubmissionType SubType, AnswerResult AnsRes, CheatCheckInfo? Cheat = null);
 
 /// <summary>
 /// Team information

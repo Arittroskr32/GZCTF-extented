@@ -1087,9 +1087,12 @@ public class GameController(
             return NotFound(new RequestResponse(localizer[nameof(Resources.Program.Submission_NotFound)],
                 StatusCodes.Status404NotFound));
 
+        // A shared-flag (cheated) solve is accepted and scored, so the submitting player is shown
+        // Accepted, exactly like a legitimate correct flag. The cheat is only visible to admins
+        // (stored status stays CheatDetected and a CheatInfo record is created).
         return Ok(submission.Status switch
         {
-            AnswerResult.CheatDetected => AnswerResult.WrongAnswer,
+            AnswerResult.CheatDetected => AnswerResult.Accepted,
             var x => x
         });
     }

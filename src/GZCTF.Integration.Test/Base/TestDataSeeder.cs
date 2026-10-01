@@ -273,6 +273,71 @@ public static class TestDataSeeder
         return new SeededChallenge(challenge.Id, challenge.Title, flag);
     }
 
+    /// <summary>
+    /// Create an enabled dynamic-container challenge. Each team is expected to receive its own flag via
+    /// <see cref="SetInstanceFlagAsync" />; no real container is started.
+    /// </summary>
+    public static async Task<SeededChallenge> CreateDynamicChallengeAsync(IServiceProvider services, int gameId,
+        string title, int originalScore = 1000, CancellationToken token = default)
+    {
+        using var scope = services.CreateScope();
+        var gameRepository = scope.ServiceProvider.GetRequiredService<IGameRepository>();
+        var challengeRepository = scope.ServiceProvider.GetRequiredService<IGameChallengeRepository>();
+
+        var game = await gameRepository.GetGameById(gameId, token)
+                   ?? throw new InvalidOperationException($"Game {gameId} not found");
+
+        GameChallenge challenge = new()
+        {
+            Title = title,
+            Content = "Dynamic challenge content",
+            Category = ChallengeCategory.Misc,
+            Type = ChallengeType.DynamicContainer,
+            Hints = [],
+            IsEnabled = true,
+            SubmissionLimit = 0,
+            OriginalScore = originalScore,
+            MinScoreRate = 0.8,
+            Difficulty = 5,
+            ContainerImage = "test:latest",
+            ExposePort = 80,
+            Game = game,
+            GameId = game.Id
+        };
+
+        await challengeRepository.CreateChallenge(game, challenge, token);
+
+        return new SeededChallenge(challenge.Id, challenge.Title, string.Empty);
+    }
+
+    /// <summary>
+    /// Assign a specific dynamic flag to a team's game instance (simulating per-team flag dispatch),
+    /// so the challenge behaves like a loaded dynamic-container instance.
+    /// </summary>
+    public static async Task SetInstanceFlagAsync(IServiceProvider services, int participationId, int challengeId,
+        string flag, CancellationToken token = default)
+    {
+        using var scope = services.CreateScope();
+        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var instance = await context.GameInstances
+                           .Include(i => i.FlagContext)
+                           .FirstOrDefaultAsync(
+                               i => i.ParticipationId == participationId && i.ChallengeId == challengeId, token)
+                       ?? throw new InvalidOperationException(
+                           $"Instance for participation {participationId} / challenge {challengeId} not found");
+
+        instance.FlagContext = new FlagContext
+        {
+            Flag = flag,
+            ChallengeId = challengeId,
+            IsOccupied = true
+        };
+        instance.IsLoaded = true;
+
+        await context.SaveChangesAsync(token);
+    }
+
     public static async Task<SeededParticipation> JoinGameAsync(IServiceProvider services, int gameId, int teamId,
         Guid userId, int? divisionId = null, CancellationToken token = default)
     {

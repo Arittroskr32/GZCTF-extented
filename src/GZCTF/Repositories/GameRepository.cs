@@ -385,7 +385,9 @@ public class GameRepository(
                         x.fs.ChallengeId,
                         x.fs.ParticipationId,
                         submission.SubmitTimeUtc,
-                        submission.UserName))
+                        submission.UserName,
+                        // A solve is cheated when a CheatInfo record references its submission.
+                        Context.CheatInfo.Any(ci => ci.SubmissionId == x.fs.SubmissionId)))
                 .ToListAsync(token);
 
             await trans.CommitAsync(token);
@@ -425,7 +427,9 @@ public class GameRepository(
                 challengeAcceptedCounts[snapshot.ChallengeId] =
                     challengeAcceptedCounts.GetValueOrDefault(snapshot.ChallengeId) + 1;
 
-            var bloodEligible = withinValidSubmissionWindow &&
+            // A cheated (shared-flag) solve is scored normally but never earns a blood bonus and never
+            // occupies a blood slot, so the next legitimate solver can still receive the blood.
+            var bloodEligible = withinValidSubmissionWindow && !snapshot.IsCheat &&
                                 CheckDivisionPermission(division, GamePermission.GetBlood, snapshot.ChallengeId);
 
             solves.Add(new ScoreboardSolve(
@@ -626,7 +630,8 @@ public class GameRepository(
         int ChallengeId,
         int ParticipantId,
         DateTimeOffset SubmitTimeUtc,
-        string? UserName);
+        string? UserName,
+        bool IsCheat);
 
     private readonly record struct ScoreboardSolve(
         int ChallengeId,

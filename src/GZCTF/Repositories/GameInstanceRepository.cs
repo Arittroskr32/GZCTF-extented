@@ -230,11 +230,13 @@ public class GameInstanceRepository(
         }
     }
 
-    public async Task<CheatCheckInfo> CheckCheat(Submission submission, CancellationToken token = default)
-    {
-        CheatCheckInfo checkInfo = new();
-
-        var instance = await Context.GameInstances
+    /// <summary>
+    /// Find the game instance of another participation on the same challenge whose dynamic flag
+    /// matches the submitted answer, i.e. the source of a shared (cheated) flag. Returns null when
+    /// the answer does not belong to any other team (not a cheat).
+    /// </summary>
+    private Task<GameInstance?> FindCheatSource(Submission submission, CancellationToken token = default)
+        => Context.GameInstances
             .Include(i => i.Participation)
             .ThenInclude(i => i.Team)
             .Include(i => i.FlagContext)
@@ -243,20 +245,36 @@ public class GameInstanceRepository(
                         i.FlagContext != null && i.FlagContext.Flag == submission.Answer)
             .FirstOrDefaultAsync(token);
 
-        if (instance is null)
-            return checkInfo;
+    /// <summary>
+    /// Record a shared-flag cheat for the given submission. Idempotent per submission: respects the
+    /// unique index on <see cref="CheatInfo.SubmissionId" /> so reprocessing the same submission does
+    /// not create a duplicate record. Must be called inside the verification transaction; the caller
+    /// is responsible for saving. Returns the cheat details used to raise the admin event.
+    /// </summary>
+    private async Task<CheatCheckInfo> RecordCheat(Submission submission, GameInstance source,
+        CancellationToken token = default)
+    {
+        var alreadyRecorded = await Context.CheatInfo.AnyAsync(c => c.SubmissionId == submission.Id, token);
 
-        var updateSub = await Context.Submissions.Where(s => s.Id == submission.Id).SingleAsync(token);
+        if (!alreadyRecorded)
+        {
+            // Reload the submission with the navigation properties CreateCheatInfo relies on
+            // (Team is auto-included; Game is included explicitly).
+            var cheatSubmission = await Context.Submissions
+                .Include(s => s.Game)
+                .SingleAsync(s => s.Id == submission.Id, token);
 
-        var cheatInfo = await cheatInfoRepository.CreateCheatInfo(updateSub, instance, token);
+            await cheatInfoRepository.CreateCheatInfo(cheatSubmission, source, token);
+        }
 
-        checkInfo = CheatCheckInfo.FromCheatInfo(cheatInfo);
-
-        updateSub.Status = AnswerResult.CheatDetected;
-
-        await SaveAsync(token);
-
-        return checkInfo;
+        return new CheatCheckInfo
+        {
+            AnswerResult = AnswerResult.CheatDetected,
+            Flag = submission.Answer,
+            SourceTeamName = source.Participation.Team.Name,
+            SubmitTeamName = submission.Team?.Name,
+            CheatUserName = submission.UserName
+        };
     }
 
     public async Task<VerifyResult> VerifyAnswer(Submission submission, CancellationToken token = default)
@@ -286,28 +304,43 @@ public class GameInstanceRepository(
                 .Select(c => new { c.Id, c.Type, c.DisableBloodBonus, c.DeadlineUtc })
                 .SingleAsync(c => c.Id == submission.ChallengeId, token);
 
+            // 1. Check whether the answer matches this team's own flag.
+            bool ownFlagAccepted;
             if (instance.FlagContext is null && challenge.Type.IsStatic())
             {
-                updateSub.Status = await Context.FlagContexts.AsNoTracking()
+                ownFlagAccepted = await Context.FlagContexts.AsNoTracking()
                     .AnyAsync(
                         f => f.ChallengeId == submission.ChallengeId && f.Flag == submission.Answer,
-                        token)
-                    ? AnswerResult.Accepted
-                    : AnswerResult.WrongAnswer;
+                        token);
             }
             else
             {
-                updateSub.Status = instance.FlagContext?.Flag == submission.Answer
-                    ? AnswerResult.Accepted
-                    : AnswerResult.WrongAnswer;
+                ownFlagAccepted = instance.FlagContext?.Flag == submission.Answer;
             }
 
-            if (updateSub.Status != AnswerResult.Accepted)
+            // 2. If it is not the team's own flag, for dynamic challenges check whether it is another
+            //    team's flag on the same challenge (flag sharing / cheating). A shared dynamic flag is
+            //    still accepted as a solve, but recorded as cheating. Static challenges share a single
+            //    flag across all teams, so sharing cannot be detected there and their behaviour is
+            //    left unchanged (a non-matching static flag is simply a wrong answer).
+            GameInstance? cheatSource = null;
+            if (!ownFlagAccepted && challenge.Type.IsDynamic())
+                cheatSource = await FindCheatSource(submission, token);
+
+            var isCheat = cheatSource is not null;
+
+            if (!ownFlagAccepted && !isCheat)
             {
+                // Genuine wrong answer.
+                updateSub.Status = AnswerResult.WrongAnswer;
                 await SaveAsync(token);
                 await transaction.CommitAsync(token);
-                return new(SubmissionType.Unaccepted, updateSub.Status);
+                return new(SubmissionType.Unaccepted, AnswerResult.WrongAnswer);
             }
+
+            // Accepted as a solve. The stored status stays CheatDetected for a shared flag so admins
+            // can still see it in the submissions monitor; the player is shown Accepted by the controller.
+            updateSub.Status = isCheat ? AnswerResult.CheatDetected : AnswerResult.Accepted;
 
             // Acquire a PostgresSQL advisory lock to prevent race conditions:
             // This lock ensures that only one concurrent submission for the same participation/challenge pair
@@ -318,6 +351,11 @@ public class GameInstanceRepository(
                 [updateSub.ParticipationId, updateSub.ChallengeId],
                 cancellationToken: token);
 
+            // Record the cheat idempotently, inside the same transaction and advisory lock as the solve.
+            CheatCheckInfo? cheatInfo = null;
+            if (isCheat)
+                cheatInfo = await RecordCheat(submission, cheatSource!, token);
+
             var alreadySolved = await Context.FirstSolves
                 .AnyAsync(fs => fs.ParticipationId == submission.ParticipationId &&
                                 fs.ChallengeId == submission.ChallengeId, token);
@@ -326,7 +364,7 @@ public class GameInstanceRepository(
             {
                 await SaveAsync(token);
                 await transaction.CommitAsync(token);
-                return new(SubmissionType.Normal, updateSub.Status);
+                return new(SubmissionType.Normal, updateSub.Status, cheatInfo);
             }
 
             var participation = await Context.Participations
@@ -348,8 +386,11 @@ public class GameInstanceRepository(
             var withinDeadline = !challenge.DeadlineUtc.HasValue ||
                                  updateSub.SubmitTimeUtc <= challenge.DeadlineUtc.Value;
 
-            // Blood bonus is only awarded if submission is within both game window and deadline
-            var hasBloodPermission = withinGameWindow && withinDeadline && !challenge.DisableBloodBonus &&
+            // Blood bonus is only awarded if submission is within both game window and deadline.
+            // A cheated (shared-flag) solve never earns a blood bonus and never occupies a blood slot,
+            // so the next legitimate solver can still receive the blood.
+            var hasBloodPermission = !isCheat && withinGameWindow && withinDeadline &&
+                                     !challenge.DisableBloodBonus &&
                                      HasPermission(participation.Division, GamePermission.GetBlood,
                                          submission.ChallengeId);
 
@@ -378,7 +419,7 @@ public class GameInstanceRepository(
             await SaveAsync(token);
             await transaction.CommitAsync(token);
 
-            return new(submissionType, updateSub.Status);
+            return new(submissionType, updateSub.Status, cheatInfo);
         }
         catch (Exception ex)
         {
@@ -408,7 +449,9 @@ public class GameInstanceRepository(
                       : div == null || div.DefaultPermissions.HasFlag(GamePermission.GetBlood))
             select participation.Id;
 
-        // Now, count FirstSolves for the challenge with eligible participations and time window
+        // Now, count FirstSolves for the challenge with eligible participations and time window.
+        // Cheated (shared-flag) solves are excluded so they never occupy a blood slot and the next
+        // legitimate solver still receives the blood.
         return (
             from fs in Context.FirstSolves.AsNoTracking()
             join submission in Context.Submissions.AsNoTracking() on fs.SubmissionId equals submission.Id
@@ -416,6 +459,7 @@ public class GameInstanceRepository(
                   && eligibleParticipationIds.Contains(fs.ParticipationId)
                   && submission.SubmitTimeUtc >= start
                   && submission.SubmitTimeUtc < end
+                  && !Context.CheatInfo.Any(ci => ci.SubmissionId == fs.SubmissionId)
             orderby submission.SubmitTimeUtc
             select fs.ParticipationId
         ).Take(4).CountAsync(token);
