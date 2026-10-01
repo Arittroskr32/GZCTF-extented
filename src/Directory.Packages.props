@@ -64,6 +64,7 @@
     <PackageVersion Include="Testcontainers.K3s" Version="4.15.0" />
     <PackageVersion Include="Testcontainers.Minio" Version="4.15.0" />
     <PackageVersion Include="Testcontainers.PostgreSql" Version="4.15.0" />
+    <PackageVersion Include="YamlDotNet" Version="16.3.0" />
     <PackageVersion Include="xunit" Version="2.9.3" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="4.0.0" />
     <PackageVersion Include="xunit.runner.console" Version="2.9.3" />

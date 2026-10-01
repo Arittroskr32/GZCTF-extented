@@ -1,4 +1,5 @@
 using System.Net.Mime;
+using GZCTF.Discord;
 using GZCTF.Middlewares;
 using GZCTF.Models.Internal;
 using GZCTF.Repositories;
@@ -95,6 +96,9 @@ internal static class ServicesExtension
             builder.Services.AddHostedService<CacheMaker>();
             builder.Services.AddHostedService<FlagChecker>();
             builder.Services.AddHostedService<CronJobService>();
+
+            // Optional Discord integration (disabled unless discord.yml is present and enabled).
+            builder.Services.AddDiscordIntegration();
         }
 
         internal void AddWebServices()

@@ -1,4 +1,5 @@
 ﻿using System.Threading.Channels;
+using GZCTF.Discord;
 using GZCTF.Repositories.Interface;
 using GZCTF.Services.Cache;
 using Microsoft.EntityFrameworkCore;
@@ -9,6 +10,7 @@ public class FlagChecker(
     ChannelReader<Submission> channelReader,
     ChannelWriter<Submission> channelWriter,
     ILogger<FlagChecker> logger,
+    IDiscordNotifier discordNotifier,
     IServiceScopeFactory serviceScopeFactory) : IHostedService
 {
     private const int MaxWorkerCount = 4;
@@ -145,6 +147,12 @@ public class FlagChecker(
                                             UserId = item.UserId,
                                             GameId = item.GameId
                                         }, token);
+
+                                    // Enqueue a private Discord alert for this cheat (at most one per
+                                    // submission, since each submission is detected here exactly once).
+                                    if (cheat is not null)
+                                        discordNotifier.NotifyCheat(item.GameId, item.ChallengeId, item.Id,
+                                            cheat, item.SubmitTimeUtc);
                                 }
 
                                 break;
@@ -168,8 +176,16 @@ public class FlagChecker(
                     if (item.Game!.EndTimeUtc > DateTimeOffset.UtcNow
                         && type != SubmissionType.Unaccepted
                         && type != SubmissionType.Normal)
+                    {
                         await gameNoticeRepository.AddNotice(
                             GameNotice.FromSubmission(item, type, StaticLocalizer), token);
+
+                        // Mirror the in-game blood notice to Discord using the same final blood tier,
+                        // so the public announcement always agrees with the scoreboard. Cheated solves
+                        // are SubmissionType.Normal and never reach here, so they never post blood.
+                        discordNotifier.NotifyFirstBlood(item.GameId, item.ChallengeId, item.TeamId, type,
+                            item.SubmitTimeUtc);
+                    }
 
                     item.Status = ans;
                     await submissionRepository.SendSubmission(item);
