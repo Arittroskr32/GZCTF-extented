@@ -1,4 +1,5 @@
 using System.Threading.Channels;
+using GZCTF.Discord.ActivityLog;
 using GZCTF.Repositories.Interface;
 using GZCTF.Services.Cache;
 using GZCTF.Services.Cache.Handlers;
@@ -20,7 +21,7 @@ public static class RuntimeCronJobs
         foreach (var container in await containerRepo.GetDyingContainers())
         {
             await trafficRegistry.ArchiveAsync(container.Id);
-            await containerRepo.DestroyContainer(container);
+            await containerRepo.DestroyContainer(container, ContainerDestroyReason.Expired);
             logger.SystemLog(
                 StaticLocalizer[nameof(Resources.Program.CronJob_RemoveExpiredContainer),
                     container.LogId],

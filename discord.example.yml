@@ -32,6 +32,39 @@ cheat_detection:
   # Include the submitted (shared) flag value in the private alert. Default: false.
   show_submitted_flag: true
 
+# Container activity log — a per-challenge, per-team timeline of container
+# lifecycle events and flag submissions, delivered to a PRIVATE channel (one
+# thread per challenge) to help spot suspiciously fast / shared-solution solves.
+# Disabling this leaves the rest of the integration working.
+activity_log:
+  enabled: true
+  # ID of the PRIVATE channel the per-challenge threads are created in. Admins +
+  # bot only. Must NOT be the same as first_blood.channel_id (a startup warning is
+  # logged if it is).
+  channel_id: "345678901234567890"
+  # Container challenge types to track. Only container types are meaningful.
+  # Default: ["DynamicContainer"]. Add "StaticContainer" to also track those.
+  challenge_types: ["DynamicContainer"]
+  # Timezone used for the times printed in reports (IANA id). Default: UTC.
+  timezone: "Asia/Dhaka"
+  live_feed:
+    # Post a compact running feed of events into each challenge's thread.
+    enabled: true
+    # Group events into one message per challenge thread every N seconds.
+    batch_seconds: 30
+  summary:
+    # Minutes between periodic full reports (0 disables the periodic report).
+    interval_minutes: 60
+    # Also post a final report for a game when it ends.
+    post_at_game_end: true
+  suspicion:
+    # Flag a solve within N minutes of that team's most recent container start.
+    fast_solve_minutes: 10
+    # Also flag a solve that had zero wrong submissions.
+    no_wrong_attempts: true
+    # Flag solves within N minutes after another team's solve of the same challenge.
+    close_solve_window_minutes: 15
+
 # Optional allow-list of game IDs to notify for. Empty list = all games.
 # The game ID is the number in the game's admin URL.
 games: []

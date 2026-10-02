@@ -8,6 +8,9 @@ namespace GZCTF.Discord;
 /// </summary>
 internal sealed class DiscordMessage
 {
+    [JsonPropertyName("content")]
+    public string? Content { get; set; }
+
     [JsonPropertyName("embeds")]
     public List<DiscordEmbed> Embeds { get; set; } = [];
 

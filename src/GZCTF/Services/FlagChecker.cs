@@ -1,5 +1,6 @@
 ﻿using System.Threading.Channels;
 using GZCTF.Discord;
+using GZCTF.Discord.ActivityLog;
 using GZCTF.Repositories.Interface;
 using GZCTF.Services.Cache;
 using Microsoft.EntityFrameworkCore;
@@ -11,6 +12,7 @@ public class FlagChecker(
     ChannelWriter<Submission> channelWriter,
     ILogger<FlagChecker> logger,
     IDiscordNotifier discordNotifier,
+    IActivityLogger activityLogger,
     IServiceScopeFactory serviceScopeFactory) : IHostedService
 {
     private const int MaxWorkerCount = 4;
@@ -98,7 +100,7 @@ public class FlagChecker(
 
                 try
                 {
-                    var (type, ans, cheat) = await instanceRepository.VerifyAnswer(item, token);
+                    var (type, ans, cheat, challengeType) = await instanceRepository.VerifyAnswer(item, token);
 
                     switch (ans)
                     {
@@ -189,6 +191,14 @@ public class FlagChecker(
 
                     item.Status = ans;
                     await submissionRepository.SendSubmission(item);
+
+                    // Record the submission result in the activity log (filtered to tracked container
+                    // challenge types by the logger). NotFound has no challenge, so it is skipped. Done
+                    // last so it can never affect scoring, events or the submission result.
+                    if (challengeType is not null)
+                        activityLogger.FlagResult(item.GameId, item.ChallengeId, challengeType.Value,
+                            item.ParticipationId, item.TeamId, item.TeamName, item.UserId, item.UserName,
+                            ans, type, cheat?.SourceTeamName, item.Answer, item.SubmitTimeUtc);
                 }
                 catch (DbUpdateConcurrencyException)
                 {

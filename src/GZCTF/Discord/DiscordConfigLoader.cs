@@ -87,7 +87,9 @@ internal static class DiscordConfigLoader
             }
         }
 
-        if (!firstBloodEnabled && !cheatEnabled)
+        var activityLog = LoadActivityLog(options, firstBloodEnabled ? firstBloodChannel : null, logger);
+
+        if (!firstBloodEnabled && !cheatEnabled && activityLog is null)
         {
             logger.Information("[Discord] No notification type is usable; Discord integration disabled");
             return null;
@@ -102,8 +104,90 @@ internal static class DiscordConfigLoader
             CheatEnabled = cheatEnabled,
             CheatChannelId = cheatChannel,
             ShowSubmittedFlag = options.CheatDetection.ShowSubmittedFlag,
+            ActivityLog = activityLog,
             Games = new HashSet<int>(options.Games)
         };
+    }
+
+    /// <summary>
+    /// Validate the <c>activity_log</c> section. Returns null (feature disabled) when it is off or
+    /// mis-configured, after logging a clear line; never throws. A broken activity-log section never
+    /// disables the rest of the integration.
+    /// </summary>
+    private static ActivityLogConfig? LoadActivityLog(DiscordOptions options, ulong? firstBloodChannel,
+        Serilog.ILogger logger)
+    {
+        var opt = options.ActivityLog;
+        if (!opt.Enabled)
+            return null;
+
+        if (!TryParseSnowflake(opt.ChannelId, out var channelId))
+        {
+            logger.Error(
+                "[Discord] activity_log.channel_id is not a valid Discord channel id; activity log disabled");
+            return null;
+        }
+
+        // Security: warn loudly if the private activity channel is the same as the public blood channel.
+        if (firstBloodChannel is not null && firstBloodChannel == channelId)
+            logger.Warning(
+                "[Discord] activity_log.channel_id equals first_blood.channel_id ({ChannelId}); " +
+                "private activity data would be posted to the public first-blood channel. Use a separate " +
+                "private channel.", channelId);
+
+        var types = new HashSet<ChallengeType>();
+        foreach (var raw in opt.ChallengeTypes)
+        {
+            if (Enum.TryParse<ChallengeType>(raw, true, out var type) && type.IsContainer())
+                types.Add(type);
+            else
+                logger.Warning(
+                    "[Discord] activity_log.challenge_types: '{Value}' is not a container challenge type; ignored",
+                    raw);
+        }
+
+        if (types.Count == 0)
+        {
+            types.Add(ChallengeType.DynamicContainer);
+            logger.Information(
+                "[Discord] activity_log.challenge_types resolved to none; defaulting to DynamicContainer");
+        }
+
+        var tz = ResolveTimezone(opt.Timezone, logger);
+
+        logger.Information(
+            "[Discord] Activity log enabled (channel {ChannelId}, types [{Types}], timezone {Tz})",
+            channelId, string.Join(", ", types), tz.Id);
+
+        return new ActivityLogConfig
+        {
+            ChannelId = channelId,
+            ChallengeTypes = types,
+            Timezone = tz,
+            LiveFeedEnabled = opt.LiveFeed.Enabled,
+            BatchSeconds = Math.Clamp(opt.LiveFeed.BatchSeconds, 5, 3600),
+            SummaryIntervalMinutes = Math.Max(0, opt.Summary.IntervalMinutes),
+            PostAtGameEnd = opt.Summary.PostAtGameEnd,
+            FastSolveMinutes = Math.Max(0, opt.Suspicion.FastSolveMinutes),
+            NoWrongAttempts = opt.Suspicion.NoWrongAttempts,
+            CloseSolveWindowMinutes = Math.Max(0, opt.Suspicion.CloseSolveWindowMinutes)
+        };
+    }
+
+    internal static TimeZoneInfo ResolveTimezone(string? id, Serilog.ILogger logger)
+    {
+        if (string.IsNullOrWhiteSpace(id))
+            return TimeZoneInfo.Utc;
+
+        try
+        {
+            return TimeZoneInfo.FindSystemTimeZoneById(id);
+        }
+        catch (Exception)
+        {
+            logger.Warning("[Discord] activity_log.timezone '{Tz}' not found; falling back to UTC", id);
+            return TimeZoneInfo.Utc;
+        }
     }
 
     /// <summary>

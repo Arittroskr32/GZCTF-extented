@@ -1,6 +1,7 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using System.Diagnostics.CodeAnalysis;
 using System.Net.Mime;
+using GZCTF.Discord.ActivityLog;
 using GZCTF.Extensions;
 using GZCTF.Middlewares;
 using GZCTF.Models.Internal;
@@ -671,7 +672,7 @@ public class AdminController(
             return NotFound(new RequestResponse(localizer[nameof(Resources.Program.Admin_ContainerInstanceNotFound)],
                 StatusCodes.Status404NotFound));
 
-        if (await containerRepository.DestroyContainer(container, token))
+        if (await containerRepository.DestroyContainer(container, ContainerDestroyReason.Admin, token))
             return Ok();
 
         return BadRequest(

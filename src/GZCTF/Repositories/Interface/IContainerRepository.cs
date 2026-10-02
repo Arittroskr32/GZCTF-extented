@@ -1,4 +1,5 @@
-﻿using GZCTF.Models.Request.Admin;
+﻿using GZCTF.Discord.ActivityLog;
+using GZCTF.Models.Request.Admin;
 
 namespace GZCTF.Repositories.Interface;
 
@@ -55,7 +56,9 @@ public interface IContainerRepository : IRepository
     /// Destroy container and remove it from database
     /// </summary>
     /// <param name="container"></param>
+    /// <param name="reason">Why the container is being destroyed, for the activity log.</param>
     /// <param name="token"></param>
     /// <returns></returns>
-    public Task<bool> DestroyContainer(Container container, CancellationToken token = default);
+    public Task<bool> DestroyContainer(Container container,
+        ContainerDestroyReason reason = ContainerDestroyReason.User, CancellationToken token = default);
 }

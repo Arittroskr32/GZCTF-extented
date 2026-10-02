@@ -83,7 +83,12 @@ public partial record DataWithModifiedTime<T>(T Data, DateTimeOffset LastModifie
 /// Cheat information when a shared flag was accepted. Non-null only when the submission was accepted
 /// as a solve while also being detected as a shared (cheated) flag.
 /// </param>
-public record VerifyResult(SubmissionType SubType, AnswerResult AnsRes, CheatCheckInfo? Cheat = null);
+/// <param name="ChallengeType">
+/// The challenge type, when known (null for a NotFound result before the challenge is resolved). Used by
+/// the activity log to filter to tracked container challenge types.
+/// </param>
+public record VerifyResult(SubmissionType SubType, AnswerResult AnsRes, CheatCheckInfo? Cheat = null,
+    ChallengeType? ChallengeType = null);
 
 /// <summary>
 /// Team information

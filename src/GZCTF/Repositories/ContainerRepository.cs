@@ -1,4 +1,5 @@
-﻿using GZCTF.Models.Request.Admin;
+﻿using GZCTF.Discord.ActivityLog;
+using GZCTF.Models.Request.Admin;
 using GZCTF.Repositories.Interface;
 using GZCTF.Services.Cache;
 using GZCTF.Services.Container.Manager;
@@ -12,6 +13,7 @@ public class ContainerRepository(
     IDistributedCache cache,
     IContainerManager service,
     TrafficRecorderRegistry trafficRegistry,
+    IActivityLogger activityLogger,
     ILogger<ContainerRepository> logger,
     AppDbContext context) : RepositoryBase(context), IContainerRepository
 {
@@ -44,11 +46,40 @@ public class ContainerRepository(
         return SaveAsync(token);
     }
 
+    /// <summary>
+    /// Resolve the owning game instance key (participation + challenge) for a container, so a destruction
+    /// can be attributed in the activity log. Returns null for non-game (exercise) containers or if the
+    /// lookup fails; never throws.
+    /// </summary>
+    private async Task<(int ParticipationId, int ChallengeId)?> ResolveInstanceKey(Container container,
+        CancellationToken token)
+    {
+        try
+        {
+            var key = await Context.GameInstances.AsNoTracking()
+                .Where(i => i.ContainerId == container.Id)
+                .Select(i => new { i.ParticipationId, i.ChallengeId })
+                .FirstOrDefaultAsync(token);
+            return key is null ? null : (key.ParticipationId, key.ChallengeId);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "[ActivityLog] Failed to resolve instance key for container {Id}",
+                container.ShortId);
+            return null;
+        }
+    }
+
     public async Task<bool> ValidateContainer(Guid guid, CancellationToken token = default) =>
         await Context.Containers.AnyAsync(c => c.Id == guid, token);
 
-    public async Task<bool> DestroyContainer(Container container, CancellationToken token = default)
+    public async Task<bool> DestroyContainer(Container container,
+        ContainerDestroyReason reason = ContainerDestroyReason.User, CancellationToken token = default)
     {
+        // Capture the owning game instance key before the row is removed (destroy nulls the link), so the
+        // activity log can attribute the destruction afterwards. Best-effort; never affects the destroy.
+        var instanceKey = await ResolveInstanceKey(container, token);
+
         try
         {
             await trafficRegistry.ArchiveAsync(container.Id);
@@ -62,6 +93,10 @@ public class ContainerRepository(
 
             Context.Containers.Remove(container);
             await SaveAsync(token);
+
+            if (instanceKey is not null)
+                activityLogger.ContainerDestroyed(instanceKey.Value.ParticipationId,
+                    instanceKey.Value.ChallengeId, reason);
 
             return true;
         }

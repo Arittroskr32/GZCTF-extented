@@ -22,6 +22,11 @@ internal sealed class DiscordConfig
     public bool ShowSubmittedFlag { get; init; }
 
     /// <summary>
+    /// Validated activity-log configuration, or null when the activity log is disabled.
+    /// </summary>
+    public ActivityLogConfig? ActivityLog { get; init; }
+
+    /// <summary>
     /// Game IDs to notify for; empty means all games.
     /// </summary>
     public IReadOnlySet<int> Games { get; init; } = new HashSet<int>();
@@ -29,7 +34,7 @@ internal sealed class DiscordConfig
     /// <summary>
     /// True when at least one notification type is enabled.
     /// </summary>
-    public bool AnyEnabled => FirstBloodEnabled || CheatEnabled;
+    public bool AnyEnabled => FirstBloodEnabled || CheatEnabled || ActivityLog is not null;
 
     /// <summary>
     /// Whether the given game should produce notifications.
@@ -49,7 +54,44 @@ internal sealed class DiscordConfig
                 ids.Add(FirstBloodChannelId);
             if (CheatEnabled)
                 ids.Add(CheatChannelId);
+            if (ActivityLog is not null)
+                ids.Add(ActivityLog.ChannelId);
             return ids;
         }
     }
+}
+
+/// <summary>
+/// Validated, runtime configuration for the activity-log module. Only constructed by
+/// <see cref="DiscordConfigLoader" /> when the section is enabled and valid.
+/// </summary>
+internal sealed class ActivityLogConfig
+{
+    public required ulong ChannelId { get; init; }
+
+    /// <summary>
+    /// Container challenge types to track (validated subset of DynamicContainer / StaticContainer).
+    /// </summary>
+    public required IReadOnlySet<ChallengeType> ChallengeTypes { get; init; }
+
+    /// <summary>
+    /// Timezone used to render report times; defaults to UTC when unset/invalid.
+    /// </summary>
+    public required TimeZoneInfo Timezone { get; init; }
+
+    public bool LiveFeedEnabled { get; init; }
+
+    public int BatchSeconds { get; init; }
+
+    public int SummaryIntervalMinutes { get; init; }
+
+    public bool PostAtGameEnd { get; init; }
+
+    public int FastSolveMinutes { get; init; }
+
+    public bool NoWrongAttempts { get; init; }
+
+    public int CloseSolveWindowMinutes { get; init; }
+
+    public bool Tracks(ChallengeType type) => ChallengeTypes.Contains(type);
 }

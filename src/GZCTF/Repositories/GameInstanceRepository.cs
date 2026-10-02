@@ -1,4 +1,5 @@
-﻿using GZCTF.Models.Internal;
+using GZCTF.Discord.ActivityLog;
+using GZCTF.Models.Internal;
 using GZCTF.Repositories.Interface;
 using GZCTF.Services.Container.Manager;
 using Microsoft.EntityFrameworkCore;
@@ -13,6 +14,7 @@ public class GameInstanceRepository(
     ICheatInfoRepository cheatInfoRepository,
     IContainerRepository containerRepository,
     IGameEventRepository gameEventRepository,
+    IActivityLogger activityLogger,
     IOptionsSnapshot<ContainerPolicy> containerPolicy,
     ILogger<GameInstanceRepository> logger,
     IStringLocalizer<Program> localizer) : RepositoryBase(context), IGameInstanceRepository
@@ -123,6 +125,7 @@ public class GameInstanceRepository(
                 StaticLocalizer[nameof(Resources.Program.InstanceRepository_ContainerCreationFailed),
                     gameInstance.Challenge.Title],
                 TaskStatus.Denied, LogLevel.Warning);
+            LogStartFailed(gameInstance, team, user, "missing container image or exposed port");
             return new TaskResult<Container>(TaskStatus.Failed);
         }
 
@@ -143,7 +146,8 @@ public class GameInstanceRepository(
                             team.Name, first.Challenge.Title,
                             first.Container!.LogId],
                         user, TaskStatus.Success);
-                    await containerRepository.DestroyContainer(running.First().Container!, token);
+                    await containerRepository.DestroyContainer(running.First().Container!,
+                        ContainerDestroyReason.LimitReached, token);
                 }
             }
             else
@@ -187,6 +191,7 @@ public class GameInstanceRepository(
                 StaticLocalizer[nameof(Resources.Program.InstanceRepository_ContainerCreationFailed),
                     gameInstance.Challenge.Title],
                 TaskStatus.Failed, LogLevel.Warning);
+            LogStartFailed(gameInstance, team, user, "container orchestrator returned no container");
             return new TaskResult<Container>(TaskStatus.Failed);
         }
 
@@ -212,8 +217,17 @@ public class GameInstanceRepository(
                 container.LogId], user,
             TaskStatus.Success);
 
+        activityLogger.ContainerStarted(gameInstance.Challenge.GameId, gameInstance.ChallengeId,
+            gameInstance.Challenge.Type, gameInstance.ParticipationId, gameInstance.Participation.TeamId,
+            team.Name, user.Id, user.UserName);
+
         return new TaskResult<Container>(TaskStatus.Success, gameInstance.Container);
     }
+
+    private void LogStartFailed(GameInstance gameInstance, Team team, UserInfo user, string reason) =>
+        activityLogger.ContainerStartFailed(gameInstance.Challenge.GameId, gameInstance.ChallengeId,
+            gameInstance.Challenge.Type, gameInstance.ParticipationId, gameInstance.Participation.TeamId,
+            team.Name, user.Id, user.UserName, reason);
 
     public async Task DestroyAllContainers(GameChallenge challenge, CancellationToken token = default)
     {
@@ -226,7 +240,8 @@ public class GameInstanceRepository(
             if (container is null)
                 continue;
 
-            await containerRepository.DestroyContainer(container, token);
+            await containerRepository.DestroyContainer(container, ContainerDestroyReason.ChallengeRemoval,
+                token);
         }
     }
 
@@ -335,7 +350,7 @@ public class GameInstanceRepository(
                 updateSub.Status = AnswerResult.WrongAnswer;
                 await SaveAsync(token);
                 await transaction.CommitAsync(token);
-                return new(SubmissionType.Unaccepted, AnswerResult.WrongAnswer);
+                return new(SubmissionType.Unaccepted, AnswerResult.WrongAnswer, ChallengeType: challenge.Type);
             }
 
             // Accepted as a solve. The stored status stays CheatDetected for a shared flag so admins
@@ -364,7 +379,7 @@ public class GameInstanceRepository(
             {
                 await SaveAsync(token);
                 await transaction.CommitAsync(token);
-                return new(SubmissionType.Normal, updateSub.Status, cheatInfo);
+                return new(SubmissionType.Normal, updateSub.Status, cheatInfo, challenge.Type);
             }
 
             var participation = await Context.Participations
@@ -419,7 +434,7 @@ public class GameInstanceRepository(
             await SaveAsync(token);
             await transaction.CommitAsync(token);
 
-            return new(submissionType, updateSub.Status, cheatInfo);
+            return new(submissionType, updateSub.Status, cheatInfo, challenge.Type);
         }
         catch (Exception ex)
         {

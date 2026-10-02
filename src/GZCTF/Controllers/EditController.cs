@@ -1,5 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using System.Net.Mime;
+using GZCTF.Discord.ActivityLog;
 using GZCTF.Extensions;
 using GZCTF.Middlewares;
 using GZCTF.Models.Request.Edit;
@@ -828,7 +829,8 @@ public class EditController(
         if (challenge.TestContainer is null)
             return Ok();
 
-        await containerRepository.DestroyContainer(challenge.TestContainer, token);
+        await containerRepository.DestroyContainer(challenge.TestContainer,
+            ContainerDestroyReason.ChallengeRemoval, token);
 
         return Ok();
     }

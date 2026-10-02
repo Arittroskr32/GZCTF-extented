@@ -4,6 +4,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Net.Mime;
 using System.Security.Claims;
 using System.Threading.Channels;
+using GZCTF.Discord.ActivityLog;
 using GZCTF.Middlewares;
 using GZCTF.Models;
 using GZCTF.Models.Internal;
@@ -51,6 +52,7 @@ public class GameController(
     IGameChallengeRepository challengeRepository,
     IGameInstanceRepository gameInstanceRepository,
     IParticipationRepository participationRepository,
+    IActivityLogger activityLogger,
     IOptionsSnapshot<ContainerPolicy> containerPolicy,
     IStringLocalizer<Program> localizer) : ControllerBase
 {
@@ -1240,7 +1242,7 @@ public class GameController(
                 return BadRequest(
                     new RequestResponse(localizer[nameof(Resources.Program.Game_ContainerAlreadyCreated)]));
 
-            await containerRepository.DestroyContainer(instance.Container, token);
+            await containerRepository.DestroyContainer(instance.Container, ContainerDestroyReason.User, token);
         }
 
         return await gameInstanceRepository.CreateContainer(instance, context.Participation!.Team, context.User!,
@@ -1303,6 +1305,10 @@ public class GameController(
         await containerRepository.ExtendLifetime(instance.Container,
             TimeSpan.FromMinutes(containerPolicy.Value.ExtensionDuration), token);
 
+        activityLogger.ContainerExtended(context.Game!.Id, challengeId, instance.Challenge.Type,
+            context.Participation!.Id, context.Participation.TeamId, context.Participation.Team.Name,
+            context.User!.Id, context.User.UserName);
+
         return Ok(ContainerInfoModel.FromContainer(instance.Container));
     }
 
@@ -1352,7 +1358,7 @@ public class GameController(
 
         var destroyId = instance.Container.LogId;
 
-        if (!await containerRepository.DestroyContainer(instance.Container, token))
+        if (!await containerRepository.DestroyContainer(instance.Container, ContainerDestroyReason.User, token))
             return BadRequest(new RequestResponse(localizer[nameof(Resources.Program.Game_ContainerDeletionFailed)]));
 
         instance.LastContainerOperation = DateTimeOffset.UtcNow;

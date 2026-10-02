@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
+using GZCTF.Discord.ActivityLog;
 using GZCTF.Models.Internal;
 using GZCTF.Repositories.Interface;
 using GZCTF.Services.Cache;
@@ -144,7 +145,8 @@ public class ExerciseInstanceRepository(
                         user.UserName!, first.Exercise.Title,
                         first.Container!.LogId],
                     user, TaskStatus.Success);
-                await containerRepository.DestroyContainer(running.First().Container!, token);
+                await containerRepository.DestroyContainer(running.First().Container!,
+                    ContainerDestroyReason.LimitReached, token);
             }
         }
 
