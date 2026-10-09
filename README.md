@@ -257,7 +257,7 @@ games: []                     # optional allow-list of game IDs for notification
 | `activity_log.live_feed.enabled` / `.batch_seconds` | Running feed per thread; flush interval (clamped 5–3600). |
 | `activity_log.summary.interval_minutes` / `.post_at_game_end` | Periodic report cadence (0 disables); also report at game end. |
 | `activity_log.suspicion.*` | The three rule thresholds; `fast_solve_minutes`/`close_solve_window_minutes` = 0 disables that rule. |
-| `games` | Allow-list of game IDs for notifications. Empty = all games. |
+| `games` | Allow-list of game IDs for Discord posts (first blood, cheat alerts, activity live feed and scheduled reports). Activity entries are still stored for every game, and an on-demand report can be requested for any game. Empty = all games. |
 
 Channel ids for first blood and cheat may be identical (deduped for the startup check). The activity channel
 should be a separate private channel.

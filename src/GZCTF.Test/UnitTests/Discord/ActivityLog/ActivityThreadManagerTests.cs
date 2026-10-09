@@ -63,7 +63,7 @@ public class ActivityThreadManagerTests
             if (req.Method == HttpMethod.Get && path.EndsWith($"/channels/{Channel}"))
                 return Json("""{"guild_id":"999"}""");
             if (req.Method == HttpMethod.Get && path.Contains("/guilds/999/threads/active"))
-                return Json("""{"threads":[{"id":"111","name":"#12 Login","thread_metadata":{"archived":false}}]}""");
+                return Json("""{"threads":[{"id":"111","name":"#12 Login","parent_id":"345678901234567890","thread_metadata":{"archived":false}}]}""");
             if (req.Method == HttpMethod.Post && path.Contains("/threads"))
             {
                 created = true;
@@ -77,6 +77,28 @@ public class ActivityThreadManagerTests
 
         Assert.Equal(111UL, id);
         Assert.False(created);
+    }
+
+    [Fact]
+    public async Task GetOrCreate_IgnoresActiveThreadInAnotherChannel_AndCreates()
+    {
+        var handler = new RouteHandler(req =>
+        {
+            var path = req.RequestUri!.AbsolutePath;
+            if (req.Method == HttpMethod.Get && path.EndsWith($"/channels/{Channel}"))
+                return Json("""{"guild_id":"999"}""");
+            if (req.Method == HttpMethod.Get && path.Contains("/guilds/999/threads/active"))
+                return Json("""{"threads":[{"id":"111","name":"#12 Login","parent_id":"1","thread_metadata":{"archived":false}}]}""");
+            if (req.Method == HttpMethod.Post && path.EndsWith($"/channels/{Channel}/threads"))
+                return Json("""{"id":"333"}""");
+            return Json("""{"threads":[]}""");
+        });
+
+        var manager = Manager(handler);
+        var id = await manager.GetOrCreateThreadAsync(12, "Login");
+
+        // A same-named thread in another (possibly public) channel must not receive private activity data.
+        Assert.Equal(333UL, id);
     }
 
     [Fact]

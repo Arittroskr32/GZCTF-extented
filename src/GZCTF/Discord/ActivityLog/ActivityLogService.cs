@@ -37,7 +37,7 @@ internal sealed class ActivityLogService(
                 try
                 {
                     var entry = await ResolveAndPersistAsync(raw, token);
-                    if (entry is not null && Config.LiveFeedEnabled)
+                    if (entry is not null && Config.LiveFeedEnabled && config.ShouldNotifyGame(entry.GameId))
                         _pending.GetOrAdd(entry.ChallengeId, _ => new ConcurrentQueue<ActivityLogEntry>())
                             .Enqueue(entry);
                 }

@@ -89,7 +89,7 @@ internal sealed class ActivitySummaryService(
                     .Select(g => g.Id).ToListAsync(token);
 
                 var interval = TimeSpan.FromMinutes(Config.SummaryIntervalMinutes);
-                foreach (var gameId in running)
+                foreach (var gameId in running.Where(config.ShouldNotifyGame))
                 {
                     var last = _lastInterval.GetValueOrDefault(gameId, DateTimeOffset.MinValue);
                     if (now - last < interval)
@@ -106,7 +106,7 @@ internal sealed class ActivitySummaryService(
                     .Where(g => g.EndTimeUtc > _startedAt && g.EndTimeUtc <= now)
                     .Select(g => g.Id).ToListAsync(token);
 
-                foreach (var gameId in justEnded)
+                foreach (var gameId in justEnded.Where(config.ShouldNotifyGame))
                 {
                     if (!_endReported.Add(gameId))
                         continue;

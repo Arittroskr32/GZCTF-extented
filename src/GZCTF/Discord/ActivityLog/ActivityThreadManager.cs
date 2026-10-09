@@ -46,12 +46,14 @@ internal sealed class ActivityThreadManager(
             var channelId = Config.ChannelId;
             var wanted = ThreadName(challengeId, title);
 
-            // 1. Active threads in the guild.
+            // 1. Active threads in the guild. The endpoint lists threads of every channel, so only threads
+            //    under the private activity channel may be reused; a same-named thread elsewhere (possibly a
+            //    public channel) must never receive activity data.
             var guildId = await ResolveGuildAsync(channelId, token);
             if (guildId is not null)
             {
                 var active = await apiClient.GetActiveThreadsAsync(guildId.Value, token);
-                var match = active.FirstOrDefault(t => NameMatches(t.Name, challengeId));
+                var match = active.FirstOrDefault(t => t.ParentId == channelId && NameMatches(t.Name, challengeId));
                 if (match is not null)
                     return Cache(challengeId, match.Id);
             }
