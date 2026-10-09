@@ -138,9 +138,54 @@ public class DiscordEndToEndTests(GZCTFApplicationFactory factory)
         Assert.Empty(discord.CreatedThreads);
     }
 
+    [Fact]
+    public async Task CheatBetweenLegitSolves_BloodsSkipCheater_AndCheatAlertShowsFlag()
+    {
+        var discord = new FakeDiscord();
+        using var app = CreateApp(discord, showFlag: true, allBloods: true);
+
+        var game = await TestDataSeeder.CreateGameAsync(app.Services, $"E2E Bloods {TestDataSeeder.RandomName()}");
+        var challenge = await TestDataSeeder.CreateDynamicChallengeAsync(app.Services, game.Id, "Bloods Chal");
+
+        var flags = Enumerable.Range(0, 4).Select(i => $"flag{{t{i}_{TestDataSeeder.RandomName()}}}").ToArray();
+        var teams = new List<(HttpClient client, string teamName)>();
+        for (var i = 0; i < 4; i++)
+            teams.Add(await SetupTeamAsync(app, game.Id, challenge.Id, flags[i], $"T{i}"));
+
+        // T0 solves (1st blood), T1 copies T0's flag (cheat), then T2 and T3 solve legitimately.
+        Assert.Equal(AnswerResult.Accepted, await SubmitAndWaitAsync(teams[0].client, game.Id, challenge.Id, flags[0]));
+        Assert.Equal(AnswerResult.Accepted, await SubmitAndWaitAsync(teams[1].client, game.Id, challenge.Id, flags[0]));
+        Assert.Equal(AnswerResult.Accepted, await SubmitAndWaitAsync(teams[2].client, game.Id, challenge.Id, flags[2]));
+        Assert.Equal(AnswerResult.Accepted, await SubmitAndWaitAsync(teams[3].client, game.Id, challenge.Id, flags[3]));
+
+        Assert.True(await WaitForAsync(() => discord.MessagesTo(BloodChannel).Count == 3 &&
+                                             discord.MessagesTo(CheatChannel).Count == 1));
+
+        // The cheater never takes a blood slot: 2nd and 3rd blood go to T2 and T3.
+        var bloods = discord.MessagesTo(BloodChannel);
+        Assert.Contains(bloods, b => b.Contains(teams[0].teamName));
+        Assert.Contains(bloods, b => b.Contains(teams[2].teamName));
+        Assert.Contains(bloods, b => b.Contains(teams[3].teamName));
+        Assert.DoesNotContain(bloods, b => b.Contains(teams[1].teamName));
+
+        // The private alert names cheater and source, and shows the flag when configured.
+        var cheat = discord.MessagesTo(CheatChannel).Single();
+        Assert.Contains(teams[1].teamName, cheat);
+        Assert.Contains(teams[0].teamName, cheat);
+        Assert.Contains(flags[0], cheat);
+
+        // Scoreboard: the cheater is scored, and the blood types match the Discord posts.
+        using var scope = app.Services.CreateScope();
+        var ctx = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var solves = await ctx.FirstSolves.AsNoTracking()
+            .Where(fs => fs.ChallengeId == challenge.Id).CountAsync();
+        Assert.Equal(4, solves);
+    }
+
     #region Helpers
 
-    private WebApplicationFactory<Program> CreateApp(FakeDiscord discord, bool showFlag, int[]? games = null)
+    private WebApplicationFactory<Program> CreateApp(FakeDiscord discord, bool showFlag, int[]? games = null,
+        bool allBloods = false)
     {
         var path = Path.Combine(Path.GetTempPath(), $"discord-e2e-{Guid.NewGuid():N}.yml");
         File.WriteAllText(path, $"""
@@ -149,6 +194,7 @@ public class DiscordEndToEndTests(GZCTFApplicationFactory factory)
             first_blood:
               enabled: true
               channel_id: "{BloodChannel}"
+              include_second_third_blood: {(allBloods ? "true" : "false")}
             cheat_detection:
               enabled: true
               channel_id: "{CheatChannel}"
