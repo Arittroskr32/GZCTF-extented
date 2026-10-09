@@ -7,9 +7,10 @@ using System.Text.Json;
 namespace GZCTF.Discord;
 
 /// <summary>
-/// A Discord thread (sub-channel) as returned by the thread-listing endpoints.
+/// A Discord thread (sub-channel) as returned by the thread-listing endpoints. <see cref="ParentId" /> is
+/// the channel the thread lives in (null when Discord did not report it).
 /// </summary>
-internal sealed record DiscordThread(ulong Id, string Name, bool Archived);
+internal sealed record DiscordThread(ulong Id, string Name, bool Archived, ulong? ParentId = null);
 
 /// <summary>
 /// Thin Discord REST client over a typed <see cref="HttpClient" /> (auth header configured at
@@ -227,7 +228,11 @@ internal sealed class DiscordApiClient(HttpClient http, ILogger<DiscordApiClient
                     var name = t.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
                     var archived = t.TryGetProperty("thread_metadata", out var meta) &&
                                    meta.TryGetProperty("archived", out var a) && a.GetBoolean();
-                    result.Add(new DiscordThread(id, name, archived));
+                    ulong? parentId = t.TryGetProperty("parent_id", out var p) &&
+                                      ulong.TryParse(p.GetString(), out var pid)
+                        ? pid
+                        : null;
+                    result.Add(new DiscordThread(id, name, archived, parentId));
                 }
             }
 
